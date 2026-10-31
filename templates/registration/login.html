@@ -1,0 +1,97 @@
+{% extends "auth_base.html" %}
+{% block title %}Sign in · Brightloop{% endblock %}
+{% block content %}
+<section class="auth-card">
+  <h1>Welcome back</h1><p class="subtitle">Sign in to access your Brightloop Billing account.</p>
+  {% if form.errors %}<div class="errorlist">The username or password is incorrect, or this account is not yet active.</div>{% endif %}
+  <form method="post" action="{% url 'app:login' %}">
+    {% csrf_token %}
+    <label for="id_username">Username</label>
+    <input id="id_username" name="username" type="text" autocomplete="username" required autofocus value="{{ form.username.value|default:'' }}">
+
+    <label for="id_password">Password</label>
+    <div class="password-field">
+      <input id="id_password" name="password" type="password" autocomplete="current-password" required>
+      <button class="password-toggle" type="button" data-password-toggle aria-label="Show password" aria-pressed="false">
+        <!-- Eye icon (hidden state) -->
+        <svg class="eye-icon eye-off" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+          <line x1="1" y1="1" x2="23" y2="23"/>
+        </svg>
+        <!-- Eye icon (visible state) -->
+        <svg class="eye-icon eye-on" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+    </div>
+
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <button type="submit">Sign in</button>
+  </form>
+  <p class="auth-foot">New to Brightloop? <a href="{% url 'app:register' %}">Create an account</a></p>
+</section>
+
+<style>
+  .password-field {
+    position: relative;
+  }
+  .password-field input {
+    padding-right: 40px; /* room for the eye icon */
+  }
+  .password-toggle {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    color: #6b7280; /* neutral gray – adjust to your theme */
+  }
+  .password-toggle:hover {
+    color: #374151;
+  }
+  .password-toggle:focus-visible {
+    outline: 2px solid #2563eb;
+    border-radius: 4px;
+  }
+  .eye-icon {
+    display: none;
+  }
+  /* By default we show the “hidden” icon (eye with slash) */
+  .password-toggle[aria-pressed="false"] .eye-off {
+    display: block;
+  }
+  .password-toggle[aria-pressed="true"] .eye-on {
+    display: block;
+  }
+</style>
+
+<script>
+  (function () {
+    const toggleBtn = document.querySelector('[data-password-toggle]');
+    if (!toggleBtn) return;
+
+    const passwordInput = document.getElementById('id_password');
+
+    toggleBtn.addEventListener('click', function () {
+      const isVisible = this.getAttribute('aria-pressed') === 'true';
+      if (isVisible) {
+        // Hide password
+        passwordInput.setAttribute('type', 'password');
+        this.setAttribute('aria-pressed', 'false');
+        this.setAttribute('aria-label', 'Show password');
+      } else {
+        // Show password
+        passwordInput.setAttribute('type', 'text');
+        this.setAttribute('aria-pressed', 'true');
+        this.setAttribute('aria-label', 'Hide password');
+      }
+    });
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "auth_base.html" %}
+{% block title %}Create account · Brightloop{% endblock %}
+{% block content %}
+<section class="auth-card">
+  <h1>Create your account</h1><p class="subtitle">Choose the account type that describes your access needs.</p>
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="errorlist">{{ form.non_field_errors }}</div>{% endif %}
+    <label for="id_username">Username</label>{{ form.username }}{% if form.username.errors %}<div class="field-errors">{{ form.username.errors }}</div>{% endif %}
+    <label for="id_email">Email address</label>{{ form.email }}{% if form.email.errors %}<div class="field-errors">{{ form.email.errors }}</div>{% endif %}
+    <label>Account type</label>
+    <div class="role-options">
+      {% for radio in form.role %}
+        <div class="role-option">{{ radio.tag }}<label for="{{ radio.id_for_label }}">{{ radio.choice_label }}
+          {% if radio.data.value == 'customer' %}<span class="role-description">Personal account to view your own plans, subscriptions and invoices.</span>{% elif radio.data.value == 'staff' %}<span class="role-description">For employees. Access is enabled only after administrator approval.</span>{% else %}<span class="role-description">Administrator accounts are created by the system owner; public self-registration is disabled.</span>{% endif %}
+        </label></div>
+      {% endfor %}
+      <div class="role-option" style="opacity:.72">
+        <input type="radio" disabled aria-label="Administrator account">
+        <label>Administrator
+          <span class="role-description">Restricted account. An existing system administrator must create or authorize administrator access.</span>
+        </label>
+      </div>
+    </div>
+    {% if form.role.errors %}<div class="field-errors">{{ form.role.errors }}</div>{% endif %}
+    <label for="id_password1">Password</label>
+    <div class="password-field">
+      {{ form.password1 }}
+      <button class="password-toggle" type="button" data-password-toggle aria-label="Show password" aria-pressed="false">Show</button>
+    </div>
+    {% if form.password1.help_text %}<span class="helptext">{{ form.password1.help_text|safe }}</span>{% endif %}{% if form.password1.errors %}<div class="field-errors">{{ form.password1.errors }}</div>{% endif %}
+    <label for="id_password2">Confirm password</label>
+    <div class="password-field">
+      {{ form.password2 }}
+      <button class="password-toggle" type="button" data-password-toggle aria-label="Show password" aria-pressed="false">Show</button>
+    </div>
+    {% if form.password2.errors %}<div class="field-errors">{{ form.password2.errors }}</div>{% endif %}
+    <div class="notice">Staff access requires approval. Administrator privileges cannot be requested through public registration.</div>
+    <button type="submit">Create account</button>
+  </form>
+  <p class="auth-foot">Already have an account? <a href="{% url 'app:login' %}">Sign in</a></p>
+</section>
+{% endblock %}

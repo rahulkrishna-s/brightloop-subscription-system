@@ -3,10 +3,12 @@ from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
+from functools import wraps
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth import login as auth_login
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
@@ -15,6 +17,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
+from django.contrib.auth.forms import UserCreationForm
+from django import forms
 
 from .models import (
     UserProfile,
@@ -47,6 +51,7 @@ def get_role(user):
 def require_roles(*roles):
     def decorator(view_func):
         @login_required
+        @wraps(view_func)
         def wrapper(request, *args, **kwargs):
             if get_role(request.user) not in roles:
                 raise PermissionDenied(
@@ -112,6 +117,83 @@ def invoice_queryset(user):
 
 
 # =========================================================
+# REGISTRATION
+# =========================================================
+
+
+class RegistrationForm(UserCreationForm):
+    email = forms.EmailField(required=True)
+
+    role = forms.ChoiceField(
+        choices=[
+            (UserProfile.Role.CUSTOMER, "Customer / User"),
+            (UserProfile.Role.STAFF, "Internal Staff"),
+        ],
+        widget=forms.RadioSelect,
+    )
+
+    class Meta(UserCreationForm.Meta):
+        model = User
+        fields = ("username", "email", "role")
+
+    # Validate username before saving
+    def clean_username(self):
+        username = self.cleaned_data.get("username", "").strip()
+
+        if User.objects.filter(username__iexact=username).exists():
+            raise forms.ValidationError(
+                "This username is already taken. Please choose another."
+            )
+
+        return username
+
+    # Save user and create associated profile
+    def save(self, commit=True):
+        user = super().save(commit=False)
+
+        user.username = self.cleaned_data["username"]
+        user.email = self.cleaned_data["email"].strip().lower()
+
+        # Staff accounts remain inactive until administrator approval.
+        user.is_active = (
+            self.cleaned_data["role"] == UserProfile.Role.CUSTOMER
+        )
+
+        if commit:
+            user.save()
+
+            UserProfile.objects.create(
+                user=user,
+                role=self.cleaned_data["role"],
+            )
+
+        return user
+
+
+def register(request):
+    if request.user.is_authenticated:
+        return redirect("app:dashboard")
+
+    if request.method == "POST":
+        form = RegistrationForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            if user.is_active:
+                auth_login(request, user)
+                messages.success(request, "Your account has been created.")
+                return redirect("app:dashboard")
+            messages.success(
+                request,
+                "Your staff account request was submitted. An administrator must approve it before you can sign in.",
+            )
+            return redirect("app:login")
+    else:
+        form = RegistrationForm()
+
+    return render(request, "registration/register.html", {"form": form})
+
+
+# =========================================================
 # DASHBOARD
 # =========================================================
 
@@ -140,7 +222,7 @@ def dashboard(request):
 
     context = {
         "role": role,
-        "total_products": Product.objects.filter(active=True).count(),
+        "total_products": Product.objects.filter(is_active=True).count(),
         "total_plans": SubscriptionPlan.objects.count(),
         "active_subscriptions": subscriptions.filter(status="active").count(),
         "total_subscriptions": subscriptions.count(),
@@ -164,7 +246,9 @@ def dashboard(request):
 
 @login_required
 def product_list(request):
-    products = Product.objects.filter(active=True).prefetch_related("taxes")
+    if get_role(request.user) not in {"admin", "staff", "customer"}:
+        raise PermissionDenied
+    products = Product.objects.filter(is_active=True).prefetch_related("taxes")
     search = request.GET.get("q", "").strip()
 
     if search:
@@ -193,6 +277,9 @@ def product_create(request):
 
             if not name:
                 raise ValidationError("Product name is required.")
+            valid_product_types = {value for value, _label in Product.ProductType.choices}
+            if product_type not in valid_product_types:
+                raise ValidationError("Select a valid product type.")
 
             sales_price = positive_decimal(
                 request.POST.get("sales_price"), "Sales price"
@@ -218,12 +305,12 @@ def product_create(request):
                 product.taxes.set(
                     TaxRate.objects.filter(
                         id__in=request.POST.getlist("taxes"),
-                        active=True,
+                        is_active=True,
                     )
                 )
 
             messages.success(request, "Product created successfully.")
-            return redirect("product_list")
+            return redirect("app:product_list")
 
         except (ValidationError, InvalidOperation, ValueError) as exc:
             message = (
@@ -234,8 +321,8 @@ def product_create(request):
             messages.error(request, message)
 
     return render(request, "products/product_form.html", {
-        "taxes": TaxRate.objects.filter(active=True),
-        "product_types": Product.TYPE_CHOICES,
+        "taxes": TaxRate.objects.filter(is_active=True),
+        "product_types": Product.ProductType.choices,
     })
 
 
@@ -245,7 +332,9 @@ def product_create(request):
 
 @login_required
 def plan_list(request):
-    plans = SubscriptionPlan.objects.prefetch_related("products")
+    if get_role(request.user) not in {"admin", "staff", "customer"}:
+        raise PermissionDenied
+    plans = SubscriptionPlan.objects.filter(is_active=True).prefetch_related("products")
 
     if get_role(request.user) == "customer":
         today = timezone.localdate()
@@ -284,7 +373,7 @@ def plan_create(request):
             interval = request.POST.get("billing_interval", "")
             valid_intervals = {
                 choice[0]
-                for choice in SubscriptionPlan.BILLING_INTERVAL_CHOICES
+                for choice in SubscriptionPlan.BillingInterval.choices
             }
 
             if interval not in valid_intervals:
@@ -313,7 +402,7 @@ def plan_create(request):
                     minimum_quantity=minimum_quantity,
                     available_from=available_from,
                     available_until=available_until,
-                    auto_close=request.POST.get("auto_close") == "on",
+                    auto_close_on_expiry=request.POST.get("auto_close") == "on",
                     allow_early_close=(
                         request.POST.get("allow_early_close") == "on"
                     ),
@@ -324,12 +413,12 @@ def plan_create(request):
                 plan.products.set(
                     Product.objects.filter(
                         id__in=request.POST.getlist("products"),
-                        active=True,
+                        is_active=True,
                     )
                 )
 
             messages.success(request, "Plan created successfully.")
-            return redirect("plan_list")
+            return redirect("app:plan_list")
 
         except (ValidationError, InvalidOperation, ValueError) as exc:
             message = (
@@ -340,8 +429,8 @@ def plan_create(request):
             messages.error(request, message)
 
     return render(request, "plans/plan_form.html", {
-        "products": Product.objects.filter(active=True),
-        "billing_intervals": SubscriptionPlan.BILLING_INTERVAL_CHOICES,
+        "products": Product.objects.filter(is_active=True),
+        "billing_intervals": SubscriptionPlan.BillingInterval.choices,
     })
 
 
@@ -357,14 +446,14 @@ def subscription_list(request):
     search = request.GET.get("q", "").strip()
 
     valid_statuses = {
-        choice[0] for choice in Subscription.STATUS_CHOICES
+        choice[0] for choice in Subscription.Status.choices
     }
     if status in valid_statuses:
         subscriptions = subscriptions.filter(status=status)
 
     if search:
         subscriptions = subscriptions.filter(
-            Q(subscription_number__icontains=search)
+            Q(number__icontains=search)
             | Q(plan__name__icontains=search)
             | Q(customer__email__icontains=search)
         )
@@ -377,7 +466,7 @@ def subscription_list(request):
         "page_obj": page_obj,
         "search": search,
         "selected_status": status,
-        "statuses": Subscription.STATUS_CHOICES,
+        "statuses": Subscription.Status.choices,
     })
 
 
@@ -393,6 +482,7 @@ def subscription_create(request):
         | Q(available_from__lte=today),
         Q(available_until__isnull=True)
         | Q(available_until__gte=today),
+        is_active=True,
     )
 
     if request.method == "POST":
@@ -423,7 +513,7 @@ def subscription_create(request):
                 )
 
             product = get_object_or_404(
-                plan.products.filter(active=True),
+                plan.products.filter(is_active=True),
                 pk=request.POST.get("product_id"),
             )
 
@@ -433,6 +523,7 @@ def subscription_create(request):
                     ProductVariant,
                     pk=request.POST.get("variant_id"),
                     product=product,
+                    is_active=True,
                 )
 
             unit_price = product.sales_price
@@ -444,7 +535,7 @@ def subscription_create(request):
 
             with transaction.atomic():
                 subscription = Subscription.objects.create(
-                    subscription_number=generate_number("SUB"),
+                    number=generate_number("SUB"),
                     customer=customer,
                     plan=plan,
                     start_date=start_date,
@@ -467,7 +558,7 @@ def subscription_create(request):
 
             messages.success(request, "Subscription created as a draft.")
             return redirect(
-                "subscription_detail", pk=subscription.pk
+                "app:subscription_detail", pk=subscription.pk
             )
 
         except (ValidationError, InvalidOperation, ValueError) as exc:
@@ -479,7 +570,8 @@ def subscription_create(request):
             messages.error(request, message)
 
     return render(request, "subscriptions/subscription_form.html", {
-        "plans": plans.prefetch_related("products"),
+        "plans": plans.filter(is_active=True).prefetch_related("products"),
+        "today": today,
         "customers": User.objects.filter(
             is_active=True,
             is_staff=False,
@@ -528,7 +620,7 @@ def subscription_transition(request, pk, action):
 
         if subscription.status != expected:
             messages.error(request, "Invalid subscription status transition.")
-            return redirect("subscription_detail", pk=pk)
+            return redirect("app:subscription_detail", pk=pk)
 
         if action == "pause" and not subscription.plan.allow_pause:
             raise PermissionDenied("Pausing is not allowed for this plan.")
@@ -540,7 +632,7 @@ def subscription_transition(request, pk, action):
         subscription.save(update_fields=["status"])
 
     messages.success(request, f"Subscription status: {new_status}.")
-    return redirect("subscription_detail", pk=pk)
+    return redirect("app:subscription_detail", pk=pk)
 
 
 # =========================================================
@@ -553,13 +645,13 @@ def invoice_list(request):
     status = request.GET.get("status", "")
     search = request.GET.get("q", "").strip()
 
-    valid_statuses = {choice[0] for choice in Invoice.STATUS_CHOICES}
+    valid_statuses = {choice[0] for choice in Invoice.Status.choices}
     if status in valid_statuses:
         invoices = invoices.filter(status=status)
 
     if search:
         invoices = invoices.filter(
-            Q(invoice_number__icontains=search)
+            Q(number__icontains=search)
             | Q(customer__email__icontains=search)
         )
 
@@ -571,7 +663,7 @@ def invoice_list(request):
         "page_obj": page_obj,
         "selected_status": status,
         "search": search,
-        "statuses": Invoice.STATUS_CHOICES,
+        "statuses": Invoice.Status.choices,
     })
 
 
@@ -593,7 +685,7 @@ def invoice_confirm(request, pk):
 
         if invoice.status != "draft":
             messages.error(request, "Only draft invoices can be confirmed.")
-            return redirect("invoice_detail", pk=pk)
+            return redirect("app:invoice_detail", pk=pk)
 
         if invoice.total_amount <= 0:
             raise ValidationError("Invoice total must be positive.")
@@ -602,7 +694,7 @@ def invoice_confirm(request, pk):
         invoice.save(update_fields=["status"])
 
     messages.success(request, "Invoice confirmed.")
-    return redirect("invoice_detail", pk=pk)
+    return redirect("app:invoice_detail", pk=pk)
 
 
 @require_POST
@@ -615,20 +707,20 @@ def invoice_cancel(request, pk):
 
         if invoice.status in {"paid", "cancelled"}:
             messages.error(request, "This invoice cannot be cancelled.")
-            return redirect("invoice_detail", pk=pk)
+            return redirect("app:invoice_detail", pk=pk)
 
         if invoice.payments.filter(status="recorded").exists():
             messages.error(
                 request,
                 "Reconcile or reverse payments before cancelling.",
             )
-            return redirect("invoice_detail", pk=pk)
+            return redirect("app:invoice_detail", pk=pk)
 
         invoice.status = "cancelled"
         invoice.save(update_fields=["status"])
 
     messages.success(request, "Invoice cancelled.")
-    return redirect("invoice_detail", pk=pk)
+    return redirect("app:invoice_detail", pk=pk)
 
 
 # =========================================================
@@ -695,14 +787,14 @@ def generate_invoice(request, subscription_id):
                 )
 
             invoice = Invoice.objects.create(
-                invoice_number=generate_number("INV"),
+                number=generate_number("INV"),
                 customer=subscription.customer,
                 subscription=subscription,
                 issue_date=timezone.localdate(),
                 due_date=timezone.localdate() + timedelta(days=14),
                 billing_period_start=period_start,
                 billing_period_end=period_end,
-                subtotal_amount=Decimal("0.00"),
+                subtotal=Decimal("0.00"),
                 discount_amount=Decimal("0.00"),
                 tax_amount=Decimal("0.00"),
                 total_amount=Decimal("0.00"),
@@ -715,7 +807,7 @@ def generate_invoice(request, subscription_id):
             for line in subscription.lines.all():
                 line_subtotal = line.unit_price * line.quantity
                 tax_rate = line.product.taxes.filter(
-                    active=True
+                    is_active=True
                 ).aggregate(total=Sum("rate"))["total"] or Decimal("0.00")
 
                 tax_amount = (
@@ -735,11 +827,11 @@ def generate_invoice(request, subscription_id):
                 subtotal += line_subtotal
                 total_tax += tax_amount
 
-            invoice.subtotal_amount = subtotal
+            invoice.subtotal = subtotal
             invoice.tax_amount = total_tax
             invoice.total_amount = subtotal + total_tax
             invoice.save(update_fields=[
-                "subtotal_amount",
+                "subtotal",
                 "tax_amount",
                 "total_amount",
             ])
@@ -759,9 +851,9 @@ def generate_invoice(request, subscription_id):
             else str(exc)
         )
         messages.error(request, message)
-        return redirect("subscription_detail", pk=subscription_id)
+        return redirect("app:subscription_detail", pk=subscription_id)
 
-    return redirect("invoice_detail", pk=invoice.pk)
+    return redirect("app:invoice_detail", pk=invoice.pk)
 
 
 # =========================================================
@@ -777,7 +869,7 @@ def record_payment(request, invoice_id):
         )
         method = request.POST.get("method", "").strip()
 
-        valid_methods = {choice[0] for choice in Payment.METHOD_CHOICES}
+        valid_methods = {choice[0] for choice in Payment.Method.choices}
         if method not in valid_methods:
             raise ValidationError("Select a valid payment method.")
 
@@ -830,7 +922,7 @@ def record_payment(request, invoice_id):
         )
         messages.error(request, message)
 
-    return redirect("invoice_detail", pk=invoice_id)
+    return redirect("app:invoice_detail", pk=invoice_id)
 
 
 # =========================================================

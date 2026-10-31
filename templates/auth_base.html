@@ -1,0 +1,150 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Brightloop · Account{% endblock %}</title>
+  <style>
+    :root{--bg:#f4f3ef;--card:#fff;--ink:#191923;--muted:#6b6b76;--line:#e7e5df;--accent:#4f46e5;--soft:#eef0ff;--danger:#b42318;--success:#16794c}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+    .topbar{height:76px;padding:0 clamp(20px,6vw,88px);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
+    .brand{font-size:21px;font-weight:800;letter-spacing:-.7px;color:var(--ink);text-decoration:none}.brand span{color:var(--accent)}
+    .toplink{color:var(--accent);text-decoration:none;font-weight:600}.auth-shell{min-height:calc(100vh - 76px);display:grid;place-items:center;padding:40px 18px}
+    .auth-card{width:min(100%,480px);background:var(--card);border:1px solid var(--line);border-radius:20px;padding:32px;box-shadow:0 12px 40px rgba(25,25,35,.045)}
+    h1{font-size:27px;line-height:1.2;margin:0 0 8px;letter-spacing:-.7px}.subtitle{color:var(--muted);margin:0 0 25px}
+    label{display:block;font-weight:650;font-size:13px;margin:14px 0 6px}input,select{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fff;color:var(--ink)}input:focus,select:focus{outline:3px solid #e4e5ff;border-color:var(--accent)}
+    button,.primary{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:10px;padding:12px 18px;background:var(--accent);color:#fff;font:inherit;font-weight:650;text-decoration:none;cursor:pointer;width:100%;margin-top:20px}
+    .auth-foot{text-align:center;color:var(--muted);font-size:14px;margin:20px 0 0}.auth-foot a{color:var(--accent);font-weight:650;text-decoration:none}
+    .messages{list-style:none;padding:0;margin:0 0 16px}.messages li,.errorlist{padding:10px 12px;border-radius:9px;background:#fde7e4;color:var(--danger);font-size:13px}.messages li.success{background:#e2f5ea;color:var(--success)}.errorlist{margin:6px 0;list-style:none}
+    .helptext{display:block;color:var(--muted);font-size:12px;margin-top:5px}.field-errors{color:var(--danger);font-size:13px;margin-top:4px}
+    .role-options{display:grid;gap:10px;margin-top:8px}.role-option{border:1px solid var(--line);border-radius:12px;padding:13px;display:flex;gap:10px;align-items:flex-start}.role-option input{width:auto;margin-top:4px}.role-option label{margin:0;font-size:14px}.role-description{display:block;color:var(--muted);font-size:12px;font-weight:400;margin-top:3px}
+    .notice{background:#fff7e6;border:1px solid #f2dfb4;color:#78520b;border-radius:10px;padding:11px 12px;font-size:13px;margin-top:14px}
+    @media(max-width:520px){.auth-card{padding:24px 20px}.topbar{height:66px}.auth-shell{min-height:calc(100vh - 66px)}}
+    /* Password field and visibility toggle alignment */
+.password-field {
+    position: relative;
+    width: 100%;
+    display: block;
+}
+
+.password-field input {
+    width: 100%;
+    box-sizing: border-box;
+    padding-right: 48px;
+}
+
+.auth-card .password-field .password-toggle {
+    position: absolute;
+    right: 12px;
+    left: auto;
+    top: 50%;
+    transform: translateY(-50%);
+
+    width: auto;
+    min-width: 0;
+    height: auto;
+    margin: 0;
+    padding: 8px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    color: #64748b;
+    cursor: pointer;
+    z-index: 2;
+}
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{% url 'app:login' %}">Bright<span>loop</span></a>
+    <div>{% if request.resolver_match.url_name == 'register' %}<a class="toplink" href="{% url 'app:login' %}">Sign in</a>{% else %}<a class="toplink" href="{% url 'app:register' %}">Create account</a>{% endif %}</div>
+  </header>
+  <main class="auth-shell">
+    <div style="width:100%;display:flex;justify-content:center">
+      {% if messages %}<ul class="messages" style="width:min(100%,480px);position:absolute;top:88px">{% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}</ul>{% endif %}
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+  <script>
+  
+document.addEventListener("DOMContentLoaded", function () {
+
+    const toggleButtons = document.querySelectorAll(
+        "[data-password-toggle]"
+    );
+
+    toggleButtons.forEach(function (button) {
+
+        button.addEventListener("click", function () {
+
+            const passwordField = button.closest(".password-field");
+            const input = passwordField.querySelector("input");
+
+            if (!input) return;
+
+            if (input.type === "password") {
+                input.type = "text";
+                button.textContent = "Hide";
+                button.setAttribute("aria-label", "Hide password");
+                button.setAttribute("aria-pressed", "true");
+            } else {
+                input.type = "password";
+                button.textContent = "Show";
+                button.setAttribute("aria-label", "Show password");
+                button.setAttribute("aria-pressed", "false");
+            }
+
+        });
+
+    });
+
+});
+
+</script>
+</body>
+
+<script>
+  
+document.addEventListener("DOMContentLoaded", function () {
+
+    const toggleButtons = document.querySelectorAll(
+        "[data-password-toggle]"
+    );
+
+    toggleButtons.forEach(function (button) {
+
+        button.addEventListener("click", function () {
+
+            const passwordField = button.closest(".password-field");
+            const input = passwordField.querySelector("input");
+
+            if (!input) return;
+
+            if (input.type === "password") {
+                input.type = "text";
+                button.textContent = "Hide";
+                button.setAttribute("aria-label", "Hide password");
+                button.setAttribute("aria-pressed", "true");
+            } else {
+                input.type = "password";
+                button.textContent = "Show";
+                button.setAttribute("aria-label", "Show password");
+                button.setAttribute("aria-pressed", "false");
+            }
+
+        });
+
+    });
+
+});
+
+</script>
+</html>
